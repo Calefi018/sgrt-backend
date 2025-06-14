@@ -19,24 +19,17 @@ app.get('/', (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        // Login especial do Admin
         if (email === 'admin@suaempresa.com' && password === 'admin123') {
             return res.status(200).json({ name: 'Admin', role: 'ADMIN' });
         }
-
         const technician = await prisma.technician.findUnique({ where: { email } });
         if (technician && technician.password === password) {
             const { password, ...technicianData } = technician;
-            // Adiciona o "papel" do usuário na resposta para o frontend saber quem está logado
             res.status(200).json({ ...technicianData, role: 'TECHNICIAN' });
         } else {
             res.status(401).json({ error: 'Credenciais inválidas' });
         }
-    } catch (error) { 
-        console.error("Erro no login:", error);
-        res.status(500).json({ error: 'Erro interno do servidor' }); 
-    }
+    } catch (error) { res.status(500).json({ error: 'Erro interno do servidor' }); }
 });
 
 // --- ROTAS DE TÉCNICOS (CRUD) ---
@@ -73,36 +66,30 @@ app.delete('/technicians/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Não foi possível deletar o técnico.' }); }
 });
 
-
 // --- ROTAS DE ORDENS DE SERVIÇO (OS) ---
 app.post('/service-orders', async (req, res) => {
     try {
-        // O frontend envia todos os dados necessários no corpo da requisição
         const newOrder = await prisma.serviceOrder.create({ data: req.body });
         res.status(201).json(newOrder);
-    } catch (error) { 
-        console.error("Erro ao criar OS:", error);
-        res.status(500).json({ error: "Não foi possível criar a Ordem de Serviço." }); 
-    }
+    } catch (error) { res.status(500).json({ error: "Não foi possível criar a Ordem de Serviço." }); }
 });
 
 app.get('/service-orders', async (req, res) => {
     try {
         const orders = await prisma.serviceOrder.findMany({
             include: { technician: true },
-            orderBy: [{ technicianId: 'asc' }, { position: 'asc' }] // Ordena por técnico e depois pela posição
+            orderBy: [{ technicianId: 'asc' }, { position: 'asc' }]
         });
         res.status(200).json(orders);
     } catch (error) { res.status(500).json({ error: "Não foi possível buscar as Ordens de Serviço." }); }
 });
 
-// Rota para o técnico ver sua própria lista de tarefas
 app.get('/my-route', async (req, res) => {
-    const { technicianId } = req.query; // Pega o ID dos parâmetros da query (ex: /my-route?technicianId=...)
+    const { technicianId } = req.query;
     try {
         const orders = await prisma.serviceOrder.findMany({
             where: { technicianId: technicianId },
-            orderBy: { position: 'asc' } // Garante que a ordem da rota seja mantida
+            orderBy: { position: 'asc' }
         });
         res.status(200).json(orders);
     } catch (error) { res.status(500).json({ error: "Não foi possível buscar a rota." }); }
@@ -114,66 +101,32 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
     try {
         const currentOrder = await prisma.serviceOrder.findUnique({ where: { id: orderId } });
         if (!currentOrder) return res.status(404).json({ error: 'OS não encontrada.' });
-        
         const dataToUpdate = { status };
-
-        // Lógica do Timer
-        if (status === 'EXECUTANDO') {
-            dataToUpdate.executionStartTime = new Date();
-        } else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
+        if (status === 'EXECUTANDO') { dataToUpdate.executionStartTime = new Date(); }
+        else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
             if (currentOrder.executionStartTime) {
                 const durationInMinutes = Math.round((new Date() - new Date(currentOrder.executionStartTime)) / 60000);
                 dataToUpdate.executionDuration = durationInMinutes;
             }
         }
-        
-        // Lógica da Justificativa
-        if (status === 'REAGENDADA' && justification) {
-            dataToUpdate.notes = `Reagendado: ${justification}`;
-        }
-
+        if (status === 'REAGENDADA' && justification) { dataToUpdate.notes = `Reagendado: ${justification}`; }
         const updatedOrder = await prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate });
         res.status(200).json(updatedOrder);
-    } catch (error) { 
-        console.error("Erro ao atualizar status:", error);
-        res.status(500).json({ error: "Não foi possível atualizar o status." }); 
-    }
+    } catch (error) { res.status(500).json({ error: "Não foi possível atualizar o status." }); }
 });
 
-// Rota para transferir uma OS para outro técnico
 app.patch('/service-orders/:orderId/transfer', async (req, res) => {
     const { orderId } = req.params;
     const { newTechnicianId } = req.body;
     if (!newTechnicianId) return res.status(400).json({ error: "O ID do novo técnico é obrigatório." });
-
     try {
-        const maxPositionResult = await prisma.serviceOrder.aggregate({
-            _max: { position: true },
-            where: { technicianId: newTechnicianId }
-        });
+        const maxPositionResult = await prisma.serviceOrder.aggregate({ _max: { position: true }, where: { technicianId: newTechnicianId } });
         const newPosition = (maxPositionResult._max.position || -1) + 1;
-
-        const updatedOrder = await prisma.serviceOrder.update({
-            where: { id: orderId },
-            data: { technicianId: newTechnicianId, position: newPosition, status: 'PENDENTE' }
-        });
+        const updatedOrder = await prisma.serviceOrder.update({ where: { id: orderId }, data: { technicianId: newTechnicianId, position: newPosition, status: 'PENDENTE' } });
         res.status(200).json(updatedOrder);
-    } catch (error) { 
-        console.error("Erro ao transferir OS:", error);
-        res.status(500).json({ error: "Não foi possível transferir a OS." }); 
-    }
+    } catch (error) { res.status(500).json({ error: "Não foi possível transferir a OS." }); }
 });
 
-// Rota para deletar uma OS
-app.delete('/service-orders/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        await prisma.serviceOrder.delete({ where: { id: id } });
-        res.status(204).send();
-    } catch (error) { res.status(500).json({ error: 'Não foi possível deletar a OS.' }); }
-});
-
-// Rota para salvar a nova ordem da rota após o drag-and-drop
 app.post('/service-orders/reorder', async (req, res) => {
     const { orderedIds } = req.body;
     try {
@@ -182,12 +135,47 @@ app.post('/service-orders/reorder', async (req, res) => {
         );
         await prisma.$transaction(updatePromises);
         res.status(200).json({ message: 'Ordem atualizada com sucesso.' });
-    } catch (error) { 
-        console.error("Erro ao reordenar:", error);
-        res.status(500).json({ error: 'Erro ao reordenar as OS.' }); 
-    }
+    } catch (error) { res.status(500).json({ error: 'Erro ao reordenar as OS.' }); }
 });
 
+// --- NOVAS ROTAS PARA EDITAR OS ---
+app.get('/service-orders/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const order = await prisma.serviceOrder.findUnique({ where: { id: id } });
+        if (!order) return res.status(404).json({ error: 'Ordem de Serviço não encontrada.' });
+        res.status(200).json(order);
+    } catch (error) { res.status(500).json({ error: 'Não foi possível buscar a Ordem de Serviço.' }); }
+});
+
+app.put('/service-orders/:id', async (req, res) => {
+    const { id } = req.params;
+    const { clientId, clientName, address, problemDescription, priority, period, notes } = req.body;
+    try {
+        const updatedOrder = await prisma.serviceOrder.update({
+            where: { id: id },
+            data: {
+                clientId: parseInt(clientId),
+                clientName,
+                address,
+                problemDescription,
+                priority,
+                period,
+                notes
+            },
+        });
+        res.status(200).json(updatedOrder);
+    } catch (error) { res.status(500).json({ error: 'Não foi possível atualizar a Ordem de Serviço.' }); }
+});
+// --- FIM DAS NOVAS ROTAS ---
+
+app.delete('/service-orders/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await prisma.serviceOrder.delete({ where: { id: id } });
+        res.status(204).send();
+    } catch (error) { res.status(500).json({ error: 'Não foi possível deletar a OS.' }); }
+});
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
