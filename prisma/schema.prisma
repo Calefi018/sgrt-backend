@@ -16,8 +16,8 @@ model Technician {
 }
 
 model ServiceOrder {
-  id                 String   @id @default(cuid())
-  position           Int      @default(0) // <-- CAMPO ADICIONADO
+  id                 String    @id @default(cuid())
+  position           Int       @default(0)
   clientId           Int
   clientName         String
   address            String
@@ -25,11 +25,13 @@ model ServiceOrder {
   priority           String
   period             String
   notes              String?
+  executionStartTime DateTime? // Para o timer
+  executionDuration  Int?      // Em minutos
 
-  status             String   @default("PENDENTE")
+  status             String    @default("PENDENTE")
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   technician         Technician @relation(fields: [technicianId], references: [id])
   technicianId       String
