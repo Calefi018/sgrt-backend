@@ -25,8 +25,8 @@ model ServiceOrder {
   priority           String
   period             String
   notes              String?
-  executionStartTime DateTime? // Para o timer
-  executionDuration  Int?      // Em minutos
+  executionStartTime DateTime?
+  executionDuration  Int? // Em minutos
 
   status             String    @default("PENDENTE")
 
