@@ -127,6 +127,31 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
 
 // --- FIM DAS ROTAS DE OS ---
 
+// index.js (backend) - Adicionar esta rota
+
+// --- ROTA DE AUTENTICAÇÃO ---
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const technician = await prisma.technician.findUnique({
+            where: { email: email }
+        });
+
+        // ATENÇÃO: Verificação de senha em texto puro. 
+        // Em um projeto real, usaríamos bcrypt.compare()
+        if (technician && technician.password === password) {
+            // Não envie a senha de volta para o cliente!
+            const { password, ...technicianData } = technician;
+            res.status(200).json(technicianData);
+        } else {
+            res.status(401).json({ error: 'Credenciais inválidas' });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
