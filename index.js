@@ -1,31 +1,21 @@
-// index.js (versão atualizada)
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { PrismaClient } = require('@prisma/client'); // Importe o Prisma
+const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient(); // Crie uma instância do cliente
+const prisma = new PrismaClient();
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.use(cors());
 app.use(express.json());
 
 // --- ROTAS DE TÉCNICOS ---
-
-// Rota para CRIAR um novo técnico
 app.post('/technicians', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    // ATENÇÃO: Em um projeto real, a senha NUNCA deve ser salva como texto puro.
-    // Usaríamos bibliotecas como 'bcrypt' para criar um hash da senha.
-    // Por simplicidade, vamos pular essa etapa por enquanto.
     const newTechnician = await prisma.technician.create({
-      data: {
-        name,
-        email,
-        password, // Lembre-se do aviso sobre a senha!
-      },
+      data: { name, email, password },
     });
     res.status(201).json(newTechnician);
   } catch (error) {
@@ -33,7 +23,6 @@ app.post('/technicians', async (req, res) => {
   }
 });
 
-// Rota para LISTAR todos os técnicos
 app.get('/technicians', async (req, res) => {
   try {
     const technicians = await prisma.technician.findMany();
@@ -43,18 +32,38 @@ app.get('/technicians', async (req, res) => {
   }
 });
 
-// --- FIM DAS ROTAS DE TÉCNICOS ---
+app.put('/technicians/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, email } = req.body;
+  try {
+    const updatedTechnician = await prisma.technician.update({
+      where: { id: id },
+      data: { name, email },
+    });
+    res.status(200).json(updatedTechnician);
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível atualizar o técnico.' });
+  }
+});
 
+app.delete('/technicians/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await prisma.serviceOrder.deleteMany({ where: { technicianId: id } });
+    await prisma.technician.delete({ where: { id: id } });
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível deletar o técnico.' });
+  }
+});
 
-// --- ROTAS DE ORDENS DE SERVIÇO (Exemplos) ---
-
-// Rota para CRIAR uma nova OS
+// --- ROTAS DE ORDENS DE SERVIÇO ---
 app.post('/service-orders', async (req, res) => {
     try {
-        const { orderNumber, clientName, address, problemDescription, priority, period, notes, technicianId } = req.body;
+        const { clientId, clientName, address, problemDescription, priority, period, notes, technicianId } = req.body;
         const newOrder = await prisma.serviceOrder.create({
             data: {
-                orderNumber: parseInt(orderNumber), // Garante que seja um número
+                clientId: parseInt(clientId),
                 clientName,
                 address,
                 problemDescription,
@@ -71,11 +80,11 @@ app.post('/service-orders', async (req, res) => {
     }
 });
 
-// Rota para PEGAR TODAS as OS (para o admin)
 app.get('/service-orders', async (req, res) => {
     try {
         const orders = await prisma.serviceOrder.findMany({
-            include: { technician: true } // Inclui os dados do técnico em cada OS
+            include: { technician: true },
+            orderBy: { createdAt: 'desc' }
         });
         res.status(200).json(orders);
     } catch (error) {
@@ -83,18 +92,12 @@ app.get('/service-orders', async (req, res) => {
     }
 });
 
-// Rota para o técnico PEGAR SUA PRÓPRIA ROTA
 app.get('/my-route/:technicianId', async (req, res) => {
     try {
         const { technicianId } = req.params;
         const orders = await prisma.serviceOrder.findMany({
-            where: {
-                technicianId: technicianId,
-                // Poderíamos adicionar filtros por data aqui no futuro
-            },
-            orderBy: {
-                createdAt: 'asc' // Ordena pela mais antiga
-            }
+            where: { technicianId: technicianId },
+            orderBy: { createdAt: 'asc' }
         });
         res.status(200).json(orders);
     } catch (error) {
@@ -102,21 +105,17 @@ app.get('/my-route/:technicianId', async (req, res) => {
     }
 });
 
-// Rota para ATUALIZAR O STATUS de uma OS
 app.patch('/service-orders/:orderId/status', async (req, res) => {
     try {
         const { orderId } = req.params;
-        const { status } = req.body; // O novo status virá no corpo da requisição
-
-        // Validação simples do status
-        const validStatus = ["PENDENTE", "A_CAMINHO", "EXECUTANDO", "FINALIZADA", "REAGENDADA"];
-        if (!validStatus.includes(status)) {
-            return res.status(400).json({ error: "Status inválido." });
+        const { status, justification } = req.body;
+        const dataToUpdate = { status };
+        if (status === 'REAGENDADA' && justification) {
+            dataToUpdate.notes = `Reagendado: ${justification}`;
         }
-
         const updatedOrder = await prisma.serviceOrder.update({
             where: { id: orderId },
-            data: { status: status }
+            data: dataToUpdate
         });
         res.status(200).json(updatedOrder);
     } catch (error) {
@@ -124,24 +123,14 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
     }
 });
 
-
-// --- FIM DAS ROTAS DE OS ---
-
-// index.js (backend) - Adicionar esta rota
-
 // --- ROTA DE AUTENTICAÇÃO ---
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-
         const technician = await prisma.technician.findUnique({
             where: { email: email }
         });
-
-        // ATENÇÃO: Verificação de senha em texto puro. 
-        // Em um projeto real, usaríamos bcrypt.compare()
         if (technician && technician.password === password) {
-            // Não envie a senha de volta para o cliente!
             const { password, ...technicianData } = technician;
             res.status(200).json(technicianData);
         } else {
@@ -153,36 +142,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// index.js (backend) - Adicionar estas duas rotas
-
-// Rota para DELETAR um técnico
-app.delete('/technicians/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    // No Prisma, antes de deletar um técnico, precisamos deletar ou reatribuir suas OS.
-    // Por simplicidade, vamos deletar as OS dele também. CUIDADO em produção!
-    await prisma.serviceOrder.deleteMany({ where: { technicianId: id } });
-    await prisma.technician.delete({ where: { id: id } });
-    res.status(204).send(); // 204 significa sucesso, sem conteúdo para retornar
-  } catch (error) {
-    res.status(500).json({ error: 'Não foi possível deletar o técnico.' });
-  }
-});
-
-// Rota para EDITAR um técnico (exemplo simples)
-app.put('/technicians/:id', async (req, res) => {
-  const { id } = req.params;
-  const { name, email } = req.body;
-  try {
-    const updatedTechnician = await prisma.technician.update({
-      where: { id: id },
-      data: { name, email },
-    });
-    res.status(200).json(updatedTechnician);
-  } catch (error) {
-    res.status(500).json({ error: 'Não foi possível atualizar o técnico.' });
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
