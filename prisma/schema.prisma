@@ -1,5 +1,3 @@
-// prisma/schema.prisma (VERSÃO CORRETA E COMPLETA)
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Modelo para os Técnicos
 model Technician {
   id            String          @id @default(cuid())
   name          String
@@ -18,16 +15,15 @@ model Technician {
   serviceOrders ServiceOrder[]
 }
 
-// Modelo para as Ordens de Serviço (OS)
 model ServiceOrder {
   id                 String   @id @default(cuid())
-  orderNumber        Int      @unique
+  clientId           Int      // Alterado de orderNumber para clientId
   clientName         String
   address            String
   problemDescription String
-  priority           String   
-  period             String   
-  notes              String?  
+  priority           String
+  period             String
+  notes              String?
 
   status             String   @default("PENDENTE")
 
