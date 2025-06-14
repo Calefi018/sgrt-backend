@@ -153,6 +153,37 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+// index.js (backend) - Adicionar estas duas rotas
+
+// Rota para DELETAR um técnico
+app.delete('/technicians/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // No Prisma, antes de deletar um técnico, precisamos deletar ou reatribuir suas OS.
+    // Por simplicidade, vamos deletar as OS dele também. CUIDADO em produção!
+    await prisma.serviceOrder.deleteMany({ where: { technicianId: id } });
+    await prisma.technician.delete({ where: { id: id } });
+    res.status(204).send(); // 204 significa sucesso, sem conteúdo para retornar
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível deletar o técnico.' });
+  }
+});
+
+// Rota para EDITAR um técnico (exemplo simples)
+app.put('/technicians/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, email } = req.body;
+  try {
+    const updatedTechnician = await prisma.technician.update({
+      where: { id: id },
+      data: { name, email },
+    });
+    res.status(200).json(updatedTechnician);
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível atualizar o técnico.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
