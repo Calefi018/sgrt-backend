@@ -26,7 +26,14 @@ model ServiceOrder {
   period             String
   notes              String?
   executionStartTime DateTime?
-  executionDuration  Int? // Em minutos
+  executionDuration  Int?      // Em minutos
+
+  // --- NOVOS CAMPOS DE GEOLOCALIZAÇÃO ---
+  startTravelLatitude  Decimal?
+  startTravelLongitude Decimal?
+  executionLatitude    Decimal?
+  executionLongitude   Decimal?
+  // --- FIM DOS NOVOS CAMPOS ---
 
   status             String    @default("PENDENTE")
 
