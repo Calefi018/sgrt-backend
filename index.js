@@ -60,7 +60,7 @@ app.put('/technicians/:id', async (req, res) => {
 app.delete('/technicians/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // onDelete: Cascade no schema.prisma agora lida com a exclusão de OS e Histórico
+    // A opção onDelete: Cascade no schema agora lida com a exclusão em cascata
     await prisma.technician.delete({ where: { id: id } });
     res.status(204).send();
   } catch (error) { res.status(500).json({ error: 'Não foi possível deletar o técnico.' }); }
@@ -81,7 +81,7 @@ app.post('/service-orders', async (req, res) => {
 app.get('/service-orders', async (req, res) => {
     try {
         const orders = await prisma.serviceOrder.findMany({
-            include: { technician: true, statusHistory: true },
+            include: { technician: true, statusHistory: { orderBy: { timestamp: 'asc' } } },
             orderBy: [{ technicianId: 'asc' }, { position: 'asc' }]
         });
         res.status(200).json(orders);
@@ -105,6 +105,7 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
     try {
         const currentOrder = await prisma.serviceOrder.findUnique({ where: { id: orderId } });
         if (!currentOrder) return res.status(404).json({ error: 'OS não encontrada.' });
+        
         const dataToUpdate = { status };
         if (location) {
             if (status === 'A_CAMINHO') {
@@ -125,12 +126,14 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
         const notesForHistory = status === 'REAGENDADA' ? justification : null;
         if (notesForHistory) dataToUpdate.notes = `Reagendado: ${notesForHistory}`;
 
+        // Usa uma transação para garantir que ambas as operações funcionem ou nenhuma
         const [updatedOrder] = await prisma.$transaction([
             prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate }),
             prisma.statusHistory.create({
                 data: { serviceOrderId: orderId, status: status, notes: notesForHistory }
             })
         ]);
+
         res.status(200).json(updatedOrder);
     } catch (error) { 
         console.error("Erro ao atualizar status:", error);
@@ -145,6 +148,7 @@ app.patch('/service-orders/:orderId/transfer', async (req, res) => {
     try {
         const maxPositionResult = await prisma.serviceOrder.aggregate({ _max: { position: true }, where: { technicianId: newTechnicianId } });
         const newPosition = (maxPositionResult._max.position || -1) + 1;
+        
         const [updatedOrder] = await prisma.$transaction([
             prisma.serviceOrder.update({ where: { id: orderId }, data: { technicianId: newTechnicianId, position: newPosition, status: 'PENDENTE' } }),
             prisma.statusHistory.create({ data: { serviceOrderId: orderId, status: 'TRANSFERIDA' } })
@@ -193,29 +197,41 @@ app.delete('/service-orders/:id', async (req, res) => {
     } catch (error) { res.status(500).json({ error: 'Não foi possível deletar a OS.' }); }
 });
 
+
 // --- NOVA ROTA PARA RELATÓRIOS ---
 app.get('/reports/service-orders', async (req, res) => {
     const { startDate, endDate, technicianId } = req.query;
+
     if (!startDate || !endDate) {
         return res.status(400).json({ error: 'As datas de início e fim são obrigatórias.' });
     }
+
     try {
         const whereClause = {
+            // Filtra pela data de criação da OS
             createdAt: {
-                gte: new Date(startDate),
-                lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)), // Inclui o dia todo
+                gte: new Date(startDate), // gte = Greater Than or Equal
+                lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)), // Garante pegar o dia todo
             }
         };
+
         if (technicianId) {
             whereClause.technicianId = technicianId;
         }
+
         const orders = await prisma.serviceOrder.findMany({
             where: whereClause,
             include: {
                 technician: true,
-                statusHistory: { orderBy: { timestamp: 'asc' } }
+                statusHistory: {
+                    orderBy: {
+                        timestamp: 'asc' // Ordena o histórico de cada OS do mais antigo para o mais novo
+                    }
+                }
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
         res.status(200).json(orders);
     } catch (error) {
@@ -223,6 +239,7 @@ app.get('/reports/service-orders', async (req, res) => {
         res.status(500).json({ error: "Não foi possível gerar o relatório." });
     }
 });
+
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
