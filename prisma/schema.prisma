@@ -28,12 +28,10 @@ model ServiceOrder {
   executionStartTime DateTime?
   executionDuration  Int?      // Em minutos
 
-  // --- NOVOS CAMPOS DE GEOLOCALIZAÇÃO ---
   startTravelLatitude  Decimal?
   startTravelLongitude Decimal?
   executionLatitude    Decimal?
   executionLongitude   Decimal?
-  // --- FIM DOS NOVOS CAMPOS ---
 
   status             String    @default("PENDENTE")
 
@@ -42,4 +40,19 @@ model ServiceOrder {
 
   technician         Technician @relation(fields: [technicianId], references: [id])
   technicianId       String
+
+  // --- NOVA RELAÇÃO COM O HISTÓRICO ---
+  statusHistory      StatusHistory[]
+}
+
+// --- NOVA TABELA PARA GUARDAR O HISTÓRICO DE STATUS ---
+model StatusHistory {
+  id             String    @id @default(cuid())
+  status         String    // Ex: "A_CAMINHO", "EXECUTANDO"
+  timestamp      DateTime  @default(now()) // Horário exato da mudança
+  notes          String?   // Para guardar a justificativa do reagendamento
+
+  // Relação com a Ordem de Serviço
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceOrderId String
 }
