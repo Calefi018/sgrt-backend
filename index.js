@@ -60,7 +60,7 @@ app.put('/technicians/:id', async (req, res) => {
 app.delete('/technicians/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    await prisma.serviceOrder.deleteMany({ where: { technicianId: id } });
+    // onDelete: Cascade no schema.prisma agora lida com a exclusão de OS e Histórico
     await prisma.technician.delete({ where: { id: id } });
     res.status(204).send();
   } catch (error) { res.status(500).json({ error: 'Não foi possível deletar o técnico.' }); }
@@ -70,6 +70,10 @@ app.delete('/technicians/:id', async (req, res) => {
 app.post('/service-orders', async (req, res) => {
     try {
         const newOrder = await prisma.serviceOrder.create({ data: req.body });
+        // Cria o primeiro registro no histórico
+        await prisma.statusHistory.create({
+            data: { serviceOrderId: newOrder.id, status: 'PENDENTE', notes: 'OS Criada' }
+        });
         res.status(201).json(newOrder);
     } catch (error) { res.status(500).json({ error: "Não foi possível criar a Ordem de Serviço." }); }
 });
@@ -77,7 +81,7 @@ app.post('/service-orders', async (req, res) => {
 app.get('/service-orders', async (req, res) => {
     try {
         const orders = await prisma.serviceOrder.findMany({
-            include: { technician: true },
+            include: { technician: true, statusHistory: true },
             orderBy: [{ technicianId: 'asc' }, { position: 'asc' }]
         });
         res.status(200).json(orders);
@@ -101,9 +105,7 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
     try {
         const currentOrder = await prisma.serviceOrder.findUnique({ where: { id: orderId } });
         if (!currentOrder) return res.status(404).json({ error: 'OS não encontrada.' });
-        
         const dataToUpdate = { status };
-
         if (location) {
             if (status === 'A_CAMINHO') {
                 dataToUpdate.startTravelLatitude = location.latitude;
@@ -113,19 +115,22 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
                 dataToUpdate.executionLongitude = location.longitude;
             }
         }
-        
-        if (status === 'EXECUTANDO') {
-            dataToUpdate.executionStartTime = new Date();
-        } else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
+        if (status === 'EXECUTANDO') { dataToUpdate.executionStartTime = new Date(); }
+        else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
             if (currentOrder.executionStartTime) {
                 const durationInMinutes = Math.round((new Date() - new Date(currentOrder.executionStartTime)) / 60000);
                 dataToUpdate.executionDuration = durationInMinutes;
             }
         }
+        const notesForHistory = status === 'REAGENDADA' ? justification : null;
+        if (notesForHistory) dataToUpdate.notes = `Reagendado: ${notesForHistory}`;
 
-        if (status === 'REAGENDADA' && justification) { dataToUpdate.notes = `Reagendado: ${justification}`; }
-        
-        const updatedOrder = await prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate });
+        const [updatedOrder] = await prisma.$transaction([
+            prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate }),
+            prisma.statusHistory.create({
+                data: { serviceOrderId: orderId, status: status, notes: notesForHistory }
+            })
+        ]);
         res.status(200).json(updatedOrder);
     } catch (error) { 
         console.error("Erro ao atualizar status:", error);
@@ -140,7 +145,10 @@ app.patch('/service-orders/:orderId/transfer', async (req, res) => {
     try {
         const maxPositionResult = await prisma.serviceOrder.aggregate({ _max: { position: true }, where: { technicianId: newTechnicianId } });
         const newPosition = (maxPositionResult._max.position || -1) + 1;
-        const updatedOrder = await prisma.serviceOrder.update({ where: { id: orderId }, data: { technicianId: newTechnicianId, position: newPosition, status: 'PENDENTE' } });
+        const [updatedOrder] = await prisma.$transaction([
+            prisma.serviceOrder.update({ where: { id: orderId }, data: { technicianId: newTechnicianId, position: newPosition, status: 'PENDENTE' } }),
+            prisma.statusHistory.create({ data: { serviceOrderId: orderId, status: 'TRANSFERIDA' } })
+        ]);
         res.status(200).json(updatedOrder);
     } catch (error) { res.status(500).json({ error: "Não foi possível transferir a OS." }); }
 });
@@ -183,6 +191,37 @@ app.delete('/service-orders/:id', async (req, res) => {
         await prisma.serviceOrder.delete({ where: { id: id } });
         res.status(204).send();
     } catch (error) { res.status(500).json({ error: 'Não foi possível deletar a OS.' }); }
+});
+
+// --- NOVA ROTA PARA RELATÓRIOS ---
+app.get('/reports/service-orders', async (req, res) => {
+    const { startDate, endDate, technicianId } = req.query;
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'As datas de início e fim são obrigatórias.' });
+    }
+    try {
+        const whereClause = {
+            createdAt: {
+                gte: new Date(startDate),
+                lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)), // Inclui o dia todo
+            }
+        };
+        if (technicianId) {
+            whereClause.technicianId = technicianId;
+        }
+        const orders = await prisma.serviceOrder.findMany({
+            where: whereClause,
+            include: {
+                technician: true,
+                statusHistory: { orderBy: { timestamp: 'asc' } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.status(200).json(orders);
+    } catch (error) {
+        console.error("Erro ao gerar relatório:", error);
+        res.status(500).json({ error: "Não foi possível gerar o relatório." });
+    }
 });
 
 app.listen(PORT, () => {
