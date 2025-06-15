@@ -60,7 +60,7 @@ app.put('/technicians/:id', async (req, res) => {
 app.delete('/technicians/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // A opção onDelete: Cascade no schema agora lida com a exclusão em cascata
+    // A opção onDelete: Cascade no schema.prisma agora lida com a exclusão em cascata
     await prisma.technician.delete({ where: { id: id } });
     res.status(204).send();
   } catch (error) { res.status(500).json({ error: 'Não foi possível deletar o técnico.' }); }
@@ -107,6 +107,7 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
         if (!currentOrder) return res.status(404).json({ error: 'OS não encontrada.' });
         
         const dataToUpdate = { status };
+
         if (location) {
             if (status === 'A_CAMINHO') {
                 dataToUpdate.startTravelLatitude = location.latitude;
@@ -116,17 +117,19 @@ app.patch('/service-orders/:orderId/status', async (req, res) => {
                 dataToUpdate.executionLongitude = location.longitude;
             }
         }
-        if (status === 'EXECUTANDO') { dataToUpdate.executionStartTime = new Date(); }
-        else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
+        
+        if (status === 'EXECUTANDO') {
+            dataToUpdate.executionStartTime = new Date();
+        } else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
             if (currentOrder.executionStartTime) {
                 const durationInMinutes = Math.round((new Date() - new Date(currentOrder.executionStartTime)) / 60000);
                 dataToUpdate.executionDuration = durationInMinutes;
             }
         }
+        
         const notesForHistory = status === 'REAGENDADA' ? justification : null;
         if (notesForHistory) dataToUpdate.notes = `Reagendado: ${notesForHistory}`;
 
-        // Usa uma transação para garantir que ambas as operações funcionem ou nenhuma
         const [updatedOrder] = await prisma.$transaction([
             prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate }),
             prisma.statusHistory.create({
@@ -197,41 +200,41 @@ app.delete('/service-orders/:id', async (req, res) => {
     } catch (error) { res.status(500).json({ error: 'Não foi possível deletar a OS.' }); }
 });
 
+// --- ROTA NOVA PARA EXCLUSÃO EM MASSA ---
+app.delete('/service-orders/all', async (req, res) => {
+    try {
+        await prisma.serviceOrder.deleteMany({});
+        res.status(204).send(); // Sucesso, sem conteúdo para retornar
+    } catch (error) {
+        console.error("Erro ao deletar todas as OS:", error);
+        res.status(500).json({ error: 'Não foi possível deletar todas as Ordens de Serviço.' });
+    }
+});
 
-// --- NOVA ROTA PARA RELATÓRIOS ---
+
+// --- ROTA DE RELATÓRIOS ---
 app.get('/reports/service-orders', async (req, res) => {
     const { startDate, endDate, technicianId } = req.query;
-
     if (!startDate || !endDate) {
         return res.status(400).json({ error: 'As datas de início e fim são obrigatórias.' });
     }
-
     try {
         const whereClause = {
-            // Filtra pela data de criação da OS
             createdAt: {
-                gte: new Date(startDate), // gte = Greater Than or Equal
-                lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)), // Garante pegar o dia todo
+                gte: new Date(startDate),
+                lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
             }
         };
-
         if (technicianId) {
             whereClause.technicianId = technicianId;
         }
-
         const orders = await prisma.serviceOrder.findMany({
             where: whereClause,
             include: {
                 technician: true,
-                statusHistory: {
-                    orderBy: {
-                        timestamp: 'asc' // Ordena o histórico de cada OS do mais antigo para o mais novo
-                    }
-                }
+                statusHistory: { orderBy: { timestamp: 'asc' } }
             },
-            orderBy: {
-                createdAt: 'desc'
-            }
+            orderBy: { createdAt: 'desc' }
         });
         res.status(200).json(orders);
     } catch (error) {
