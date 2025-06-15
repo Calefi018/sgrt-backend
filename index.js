@@ -97,22 +97,40 @@ app.get('/my-route', async (req, res) => {
 
 app.patch('/service-orders/:orderId/status', async (req, res) => {
     const { orderId } = req.params;
-    const { status, justification } = req.body;
+    const { status, justification, location } = req.body;
     try {
         const currentOrder = await prisma.serviceOrder.findUnique({ where: { id: orderId } });
         if (!currentOrder) return res.status(404).json({ error: 'OS não encontrada.' });
+        
         const dataToUpdate = { status };
-        if (status === 'EXECUTANDO') { dataToUpdate.executionStartTime = new Date(); }
-        else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
+
+        if (location) {
+            if (status === 'A_CAMINHO') {
+                dataToUpdate.startTravelLatitude = location.latitude;
+                dataToUpdate.startTravelLongitude = location.longitude;
+            } else if (status === 'EXECUTANDO') {
+                dataToUpdate.executionLatitude = location.latitude;
+                dataToUpdate.executionLongitude = location.longitude;
+            }
+        }
+        
+        if (status === 'EXECUTANDO') {
+            dataToUpdate.executionStartTime = new Date();
+        } else if (currentOrder.status === 'EXECUTANDO' && (status === 'FINALIZADA' || status === 'REAGENDADA')) {
             if (currentOrder.executionStartTime) {
                 const durationInMinutes = Math.round((new Date() - new Date(currentOrder.executionStartTime)) / 60000);
                 dataToUpdate.executionDuration = durationInMinutes;
             }
         }
+
         if (status === 'REAGENDADA' && justification) { dataToUpdate.notes = `Reagendado: ${justification}`; }
+        
         const updatedOrder = await prisma.serviceOrder.update({ where: { id: orderId }, data: dataToUpdate });
         res.status(200).json(updatedOrder);
-    } catch (error) { res.status(500).json({ error: "Não foi possível atualizar o status." }); }
+    } catch (error) { 
+        console.error("Erro ao atualizar status:", error);
+        res.status(500).json({ error: "Não foi possível atualizar o status." }); 
+    }
 });
 
 app.patch('/service-orders/:orderId/transfer', async (req, res) => {
@@ -138,7 +156,6 @@ app.post('/service-orders/reorder', async (req, res) => {
     } catch (error) { res.status(500).json({ error: 'Erro ao reordenar as OS.' }); }
 });
 
-// --- NOVAS ROTAS PARA EDITAR OS ---
 app.get('/service-orders/:id', async (req, res) => {
     const { id } = req.params;
     try {
@@ -154,20 +171,11 @@ app.put('/service-orders/:id', async (req, res) => {
     try {
         const updatedOrder = await prisma.serviceOrder.update({
             where: { id: id },
-            data: {
-                clientId: parseInt(clientId),
-                clientName,
-                address,
-                problemDescription,
-                priority,
-                period,
-                notes
-            },
+            data: { clientId: parseInt(clientId), clientName, address, problemDescription, priority, period, notes },
         });
         res.status(200).json(updatedOrder);
     } catch (error) { res.status(500).json({ error: 'Não foi possível atualizar a Ordem de Serviço.' }); }
 });
-// --- FIM DAS NOVAS ROTAS ---
 
 app.delete('/service-orders/:id', async (req, res) => {
     const { id } = req.params;
